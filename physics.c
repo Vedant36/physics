@@ -14,6 +14,12 @@
 #include "physics.h"
 #define MIN(a, b) ((a) > (b) ? (b) : (a))
 #define MAX(a, b) ((a) < (b) ? (b) : (a))
+Vector2 _t;
+#define CX SW/2
+#define CY SH/2
+int zoom = 1;
+#define T(v) (_t = v, (Vector2) {CX + _t.x*zoom, CY - _t.y*zoom})
+#define _T(v) (_t = v, (Vector2) {(-CX + _t.x)/zoom, (CY - _t.y)/zoom})
 
 const float CR = (SW > SH ? SH : SW) / 2;
 #define G  10			/* Gravity coefficient */
@@ -36,7 +42,7 @@ Vector2 gravity(object *a, object *b)
 	if (a->flags&PHY_GRAVITY && !(b->flags&PHY_MASSLESS)) {
 		Vector2 r = Vector2Subtract(b->p, a->p);
 		float l = Vector2Length(r);
-		return Vector2Scale(r, b->mass * G/(l*l*l + 1));
+		return Vector2Scale(r, powf(b->r, 3) * G/(l*l*l + 1));
 	} else if (a->flags&PHY_UNIVERSAL_GRAVITY_RECIEVER && b->flags&PHY_UNIVERSAL_GRAVITY_DONOR) {
 		return (Vector2) {0, G};
 	} else {
@@ -53,7 +59,7 @@ void reset(world *w, float delta)
 	w->o.size = 0;
 	pointer = 0;
 	world_add_object_at(w, ((Vector2) {SW/2, SH/2}), PHY_GRAVITY);
-	AT(w->o, 0).mass = 1000000;
+	AT(w->o, 0).r = 10;
 	/* world_add_object_at(w, (Vector2) {SW/2, SH/2}, PHY_INVISIBLE); */
 	/* world_add_object_at(w, (Vector2) {SW/2, SH/2}, PHY_GRAVITY); */
 	/* world_add_object_at(w, Vector2Zero(), PHY_UNIVERSAL_GRAVITY_DONOR | PHY_INVISIBLE); */
@@ -82,9 +88,11 @@ int main()
 	SetTargetFPS(60);
 	ToggleFullscreen();
 	ToggleFullscreen();
+	int time_count, time_max;
 	while (!WindowShouldClose())
 	{
-		profile_time[0] = profile();
+		time_count++;
+		profile_time[time_count++] = profile();
 		float delta = GetFrameTime();
 		if (delta > 0.01) delta = 0.01;
 
@@ -92,7 +100,7 @@ int main()
 		if (KEY(R)) reset(&w, delta);
 		if (KEY(A)) {
 			world_add_object_at(&w, GetMousePosition(), PHY_GRAVITY);
-			AT(w.o, w.o.size - 1).mass = random()%500 + 500;
+			AT(w.o, w.o.size - 1).r = random()%7 + 3;
 		}
 		if (KEY(SPACE)) paused = !paused;
 		if (KEY(S)) world_step(&w, delta), paused = true;
@@ -103,7 +111,7 @@ int main()
 			/* pp = p - d v */
 			AT(w.o, w.o.size - 1).pp = Vector2Subtract(AT(w.o, w.o.size - 1).p,
 								Vector2Scale(Vector2Subtract(GetMousePosition(), setpos), delta));
-			AT(w.o, w.o.size - 1).mass = random()%500 + 500;
+			AT(w.o, w.o.size - 1).r = random()%7 + 3;
 		}
 		if (KEY(F)) {
 			float r = 100;
@@ -121,19 +129,19 @@ int main()
 			for (int i = 0; i < w.o.size; i++)
 				if (!(AT(w.o, i).flags&PHY_INVISIBLE))
 					object_log(i, AT(w.o, i));
-		if (KEY(P)) {
+		if (KEY(T)) {
 			for (int i = 0; i < 5; i++)
 				printf("%f ", profile_time[i]);
 			printf("\n");
 		}
-		profile_time[1] = profile();
 
 		/* Apply forces */
+		profile_time[time_count++] = profile();
 		world_apply_forces(&w);
-		profile_time[2] = profile();
 
 
 		/* Update positions */
+		profile_time[time_count++] = profile();
 		if (!paused) {
 			for (int i = 0; i < MIN(SAVE_COUNT, w.o.size); i++)
 				if (w.o.size)
@@ -141,7 +149,6 @@ int main()
 			pointer = (pointer+1)%HIST_SIZE;
 			world_step(&w, delta);
 		}
-		profile_time[3] = profile();
 
 
 		/* Vector2 com = Vector2Zero(); */
@@ -153,6 +160,7 @@ int main()
 		/* world_center(&w, AT(w.o, 0).p); */
 
 		/* Draw */
+		profile_time[time_count++] = profile();
 		BeginDrawing();
 		ClearBackground(BLACK);
 		if (KEY(R)) ClearBackground(BLACK);
@@ -168,7 +176,8 @@ int main()
 		for (int i = 0; i < w.o.size; i++)
 			object_show(AT(w.o, i));
 		EndDrawing();
-		profile_time[4] = profile();
+		profile_time[time_count++] = profile();
+		if (time_count > time_max) time_max = time_count;
 	}
 	CloseWindow();
 	world_free(&w);
@@ -192,6 +201,6 @@ void object_show(object o)
 		/* DrawLineV(AT(o, i).p, Vector2Add(AT(o, i).p, v), RED); */
 		/* DrawCircleV(AT(o, i).p, 3, (Color) {138*i, 244, 138, 255}); */
 		/* DrawPixelV(o.p, (Color) {255. * o.mass / 1000., 34, 56, 255}); */
-		DrawCircleV(o.p, 3.*powf(o.mass, 1./3)/10, (Color) {255. * powf(o.mass, 1./3) / 100., 34, 56, 255});
+		DrawCircleV(o.p, o.r, (Color) {255. * o.r / 10., 34, 56, 255});
 	}
 }
