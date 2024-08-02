@@ -5,13 +5,18 @@
 #define ARRAY_IMPLEMENTATION
 #include "array.h"
 
+#define A(v, w) Vector2Add(v, w)
+#define S(v, w) Vector2Subtract(v, w)
+#define C(v, s) Vector2Scale(v, s)
+#define L(v) Vector2Length(v)
+
 typedef struct object {
 	Vector2 p, pp;	/* Verlet */
-	int mass;
-	Vector2 v, a;
+	float r;
 	unsigned int flags;
+
+	Vector2 v, a;
 } object;
-Vector2 object_velocity(object *o, float delta);
 
 #ifndef WORLD_INITIAL_CAP
 #define WORLD_INITIAL_CAP 64
@@ -20,15 +25,11 @@ typedef Vector2 (*force)(object*, object*);
 typedef struct world {
 	ARRAY(object) o;
 	ARRAY(force) f;
-	/* object *objects; */
-	/* int o_size, o_capacity; */
-	/* force *forces; */
-	/* int f_size, f_capacity; */
 } world;
-#define world_add_object_at(w, p, flags) array_append((w)->o, ((object) {(p), (p), 0, Vector2Zero(), Vector2Zero(), flags}))
+#define world_add_object_at(w, p, flags) array_append((w)->o, ((object) {(p), (p), 0, flags, Vector2Zero(), Vector2Zero()}))
 #define world_add_force(w, F) array_append((w)->f, F)
 void world_apply_forces(world *w);
-void world_step(world *w, float delta);
+void world_step(world *w, double delta);
 void world_center(world *w, Vector2 origin);
 #define world_free(w)			\
 	do {					\
@@ -40,16 +41,6 @@ void world_center(world *w, Vector2 origin);
 
 #ifdef PHYSICS_IMPLEMENTATION
 
-Vector2 object_velocity(object *o, float delta)
-{
-	/* (p - pp - a δ²) / δ */
-	return Vector2Scale(
-		Vector2Subtract(Vector2Subtract(o->p, o->pp),
-				Vector2Scale(o->a, delta*delta)),
-		1./delta);
-}
-
-
 void world_apply_forces(world *w)
 {
 	if (w->f.size == 0 || w->o.size < 2) return;
@@ -58,23 +49,29 @@ void world_apply_forces(world *w)
 		for (int j = 0; j < w->o.size; j++) {
 			if (i==j) continue;
 			for (int k = 0; k < w->f.size; k++) {
-				Vector2 acc = AT(w->f, k)(&AT(w->o, i), &AT(w->o, j));
-				AT(w->o, i).a = Vector2Add(AT(w->o, i).a, acc);
+				force f = AT(w->f, k);
+				object *a = &AT(w->o, i);
+				object *b = &AT(w->o, j);
+				Vector2 acc = f(a, b);
+				AT(w->o, i).a = A(AT(w->o, i).a, acc);
 			}
 		}
 	}
 }
 
-void world_step(world *w, float delta)
+void world_step(world *w, double delta)
 {
-	for (object *ptr = w->o.list, *end = w->o.list + w->o.size; ptr != end; ptr++) {
-		Vector2 tmp = ptr->p;
+	for (int i = 0; i < w->o.size; i++) {
+		object *ptr = &AT(w->o, i);
+		Vector2 p = ptr->p, pp = ptr->pp, v = ptr->v, a = ptr->a;
+		/* ptr->v = A(v, C(a, delta)); */
+		/* ptr->p = A(p, C(v, delta)); */
+
 		/* p = 2 p - pp + a δ² */
-		ptr->p = Vector2Add(
-			Vector2Subtract(Vector2Scale(ptr->p, 2), ptr->pp),
-			Vector2Scale(ptr->a, delta*delta));
-		ptr->pp = tmp;
-		ptr->v = object_velocity(ptr, delta);
+		ptr->p.x = 2*p.x - pp.x + a.x * delta * delta;
+		ptr->p.y = 2*p.y - pp.y + a.y * delta * delta;
+		ptr->v = A(v, C(a, delta));
+		ptr->pp = p;
 	}
 }
 

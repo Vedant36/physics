@@ -2,6 +2,7 @@
 !*.*
 !Makefile
 !.gitignore
+energy.txt
 *~
 \#*\#
 .\#*
