@@ -10,6 +10,10 @@
 #define C(v, s) Vector2Scale(v, s)
 #define L(v) Vector2Length(v)
 
+typedef struct frame {
+	Vector2 p;
+} frame;
+
 typedef struct object {
 	Vector2 p, pp;	/* Verlet */
 	float r;
@@ -26,11 +30,11 @@ typedef struct world {
 	ARRAY(object) o;
 	ARRAY(force) f;
 } world;
-#define world_add_object_at(w, p, flags) array_append((w)->o, ((object) {(p), (p), 0, flags, Vector2Zero(), Vector2Zero()}))
+int world_add_object(world *w, Vector2 p, Vector2 v, float r, unsigned int flags, float delta);
+#define world_add_object_at(w, p, flags) world_add_object(w, p, Vector2Zero(), 0, flags, 0)
 #define world_add_force(w, F) array_append((w)->f, F)
 void world_apply_forces(world *w);
 void world_step(world *w, double delta);
-void world_center(world *w, Vector2 origin);
 #define world_free(w)			\
 	do {					\
 		array_free((w)->o);		\
@@ -40,6 +44,12 @@ void world_center(world *w, Vector2 origin);
 #endif /* PHYSICS_H */
 
 #ifdef PHYSICS_IMPLEMENTATION
+
+inline int world_add_object(world *w, Vector2 p, Vector2 v, float r, unsigned int flags, float delta)
+{
+	array_append(w->o, ((object) {p, S(p, C(v, delta)), r, flags, v, Vector2Zero()}));
+	return w->o.size - 1;
+}
 
 void world_apply_forces(world *w)
 {
@@ -53,7 +63,7 @@ void world_apply_forces(world *w)
 				object *a = &AT(w->o, i);
 				object *b = &AT(w->o, j);
 				Vector2 acc = f(a, b);
-				AT(w->o, i).a = A(AT(w->o, i).a, acc);
+				AT(w->o, i).a = A(a->a, acc);
 			}
 		}
 	}
@@ -72,15 +82,6 @@ void world_step(world *w, double delta)
 		ptr->p.y = 2*p.y - pp.y + a.y * delta * delta;
 		ptr->v = A(v, C(a, delta));
 		ptr->pp = p;
-	}
-}
-
-void world_center(world *w, Vector2 origin)
-{
-	Vector2 shift = Vector2Subtract((Vector2) {SW/2, SH/2}, origin);
-	for (int i = 0; i < w->o.size; i++) {
-		AT(w->o, i).p = Vector2Add(AT(w->o, i).p, shift);
-		AT(w->o, i).pp = Vector2Add(AT(w->o, i).pp, shift);
 	}
 }
 

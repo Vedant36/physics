@@ -13,5 +13,5 @@ def animate(i):
     for i in range(n):
         plt.plot(qwe[0], qwe[i+1], c=colors[i])
 
-ani = FuncAnimation(figure, animate, interval=2000, save_count=MAX_FRAMES)
+ani = FuncAnimation(figure, animate, interval=2000)
 plt.show()

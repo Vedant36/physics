@@ -11,7 +11,7 @@
 
 #define PROFILE_IMPLEMENTATION
 #include "profile.h"
-#define profile() 0		/* uncomment if you don't want to use profile.h */
+/* #define profile() 0		/\* uncomment if you don't want to use profile.h *\/ */
 
 #define SW 500
 #define SH 500
@@ -20,16 +20,19 @@
 
 #define MIN(a, b) ((a) > (b) ? (b) : (a))
 #define MAX(a, b) ((a) < (b) ? (b) : (a))
-Vector2 _t;
 Vector2 origin = {SW/2, SH/2};
-int zoom = 1;
-#define T(v) (_t = v, (Vector2) {origin.x + _t.x*zoom, origin.y - _t.y*zoom})
-#define _T(v) (_t = v, (Vector2) {(-origin.x + _t.x)/zoom, (origin.y - _t.y)/zoom})
+float zoom = 1;
 const float CR = (SW > SH ? SH : SW) / 2;
 #define G  10			/* Gravity coefficient */
 #define SUBFRAMES 10.
 #define KEY(k) (IsKeyPressed(KEY_##k) || IsKeyPressedRepeat(KEY_##k))
 #define BIND(key, param) if (KEY(key)) param += 1 - 2 * IsKeyDown(KEY_LEFT_SHIFT)
+frame g;
+Vector2 _t;
+/* position to screen and inverse */
+#define T(v) (_t = v, (Vector2) {(_t.x - g.p.x)*zoom + origin.x, (-_t.y + g.p.y)*zoom + origin.y})
+#define _T(v) (_t = v, (Vector2) {(_t.x - origin.x)/zoom + g.p.x, -(_t.y - origin.y)/zoom + g.p.y})
+#define LOGV(v) (_t = v, printf("(%f %f)\n", _t.x, _t.y))
 
 enum flags {
 	PHY_INVISIBLE = 0x1,
@@ -62,6 +65,7 @@ int pointer = 0, speed;
 bool paused, hud, stepped = false;
 void reset(world *w, double delta)
 {
+	g.p = Vector2Zero();
 	w->o.size = 0;
 	hud = true;
 	paused = true;
@@ -96,17 +100,18 @@ int main()
 	srandom(time(NULL));
 
 	InitWindow(SW, SH, "Physics Simulation");
+	Rectangle screen = {0, 0, SW, SH};
 	SetTargetFPS(60);
 	ToggleFullscreen();
 	ToggleFullscreen();
 	int tick = 0;
-	int time_count, time_max;
+	int time_count, time_max = 0;
 	while (!WindowShouldClose())
 	{
 		time_count = 0;
 		profile_time[time_count++] = profile();
 		double delta = GetFrameTime();
-		if (delta > 0.01) delta = 0.01;
+		if (delta > 1./30) delta = 1./30;
 
 		/* Handle Keys */
 		if (KEY(R)) reset(&w, delta/SUBFRAMES);
@@ -117,21 +122,23 @@ int main()
 		if (KEY(BACKSLASH)) hud = !hud;
 		if (KEY(SPACE)) paused = !paused;
 		BIND(Q, speed);
+		if (KEY(Z)) {
+			if (IsKeyDown(KEY_LEFT_SHIFT))
+				zoom /= 2;
+			else
+				zoom *= 2;
+		}
 		if (KEY(S)) {
 			world_apply_forces(&w);
 			world_step(&w, delta/SUBFRAMES);
 			paused = true;
 			stepped = true;
 		}
-		if (IsKeyPressed(KEY_D) || IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) setpos = GetMousePosition();
+		if (IsKeyPressed(KEY_D) || IsMouseButtonPressed(MOUSE_LEFT_BUTTON))
+			setpos = GetMousePosition();
 		if (IsKeyReleased(KEY_D) || IsMouseButtonReleased(MOUSE_LEFT_BUTTON)) {
-			world_add_object_at(&w, _T(setpos), PHY_GRAVITY);
-			/* pp = p - d v */
-			Vector2 v = Vector2Subtract(GetMousePosition(), setpos);
-			AT(w.o, w.o.size - 1).v = v;
-			AT(w.o, w.o.size - 1).pp = Vector2Subtract(AT(w.o, w.o.size - 1).p,
-								Vector2Scale(v, delta/SUBFRAMES));
-			AT(w.o, w.o.size - 1).r = powf(random()%500 + 500, 1./3);
+			Vector2 v = S(_T(GetMousePosition()), _T(setpos));
+			world_add_object(&w, _T(setpos), v, powf(random()%5000 + 500, 1./3), PHY_GRAVITY, delta/SUBFRAMES);
 		}
 		if (KEY(F)) {
 			float r = 100;
@@ -144,9 +151,10 @@ int main()
 		}
 		if (KEY(L))
 			for (int i = 0; i < w.o.size; i++)
-				if (!(AT(w.o, i).flags&PHY_INVISIBLE))
+				if (!(AT(w.o, i).flags&PHY_INVISIBLE) && CheckCollisionPointRec(T(AT(w.o, i).p), screen))
 					object_log(i, AT(w.o, i));
 		if (KEY(T)) {
+			printf("Timeinfo: ");
 			for (int i = 0; i < time_max; i++)
 				printf("%f ", profile_time[i]);
 			printf("\n");
@@ -168,7 +176,6 @@ int main()
 				}
 		}
 
-
 		/* Log Energy */
 		profile_time[time_count++] = profile();
 		if (!paused || stepped) {
@@ -189,10 +196,33 @@ int main()
 			fprintf(stderr, "%d %f\n", tick++, E);
 		}
 
+		/* Log Momentum */
+		profile_time[time_count++] = profile();
+		if (!paused || stepped) {
+			Vector2 P = {0};
+			for (int i = 0; i < w.o.size; i++) {
+				Vector2 p = C(AT(w.o, i).v, powf(AT(w.o, i).r, 3));
+			        P = A(P, p);
+			}
+			/* fprintf(stderr, "%d %f\n", tick++, L(P)); */
+		}
+
+		/* Frame: com of all objects on screen */
+		Vector2 com = Vector2Zero();
+		float total_mass = 0;
+		for (int i = 0; i < w.o.size; i++) {
+			object o = AT(w.o, i);
+			if (!CheckCollisionPointRec(T(o.p), screen)) continue;
+			com = A(com, C(o.p, powf(o.r, 3)));
+			total_mass += powf(o.r, 3);
+		}
+		g.p = total_mass > 0.1 ? C(com, 1./total_mass) : Vector2Zero();
+
 		/* Draw */
 		profile_time[time_count++] = profile();
 		BeginDrawing();
 		ClearBackground(BLACK);
+		DrawCircleV(T(g.p), 3*powf(total_mass, 1./3)/10, BLUE);
 		if (hud) {
 			DrawFPS(0, 0);
 		}
@@ -204,7 +234,7 @@ int main()
 			}
 		}
 		for (int i = 0; i < w.o.size; i++)
-			object_show(AT(w.o, i));
+				object_show(AT(w.o, i));
 		EndDrawing();
 
 		profile_time[time_count++] = profile();
@@ -232,6 +262,6 @@ void object_show(object o)
 		DrawLineV(A(AT(o, i).p, v), A(A(AT(o, i).p, v), C(AT(o, i).a, 0.1)), WHITE);
 		DrawLineV(AT(o, i).p, Vector2Add(AT(o, i).p, v), RED);
 #endif
-		DrawCircleV(T(o.p), 3.*o.r/10, (Color) {255. * o.r / 100., 34, 56, 255});
+		DrawCircleV(T(o.p), 3.*o.r*zoom/10, (Color) {255. * o.r / 100., 34, 56, 255});
 	}
 }
