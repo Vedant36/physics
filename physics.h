@@ -25,11 +25,12 @@ typedef struct object {
 #ifndef WORLD_INITIAL_CAP
 #define WORLD_INITIAL_CAP 64
 #endif
-typedef Vector2 (*force)(object*, object*);
-typedef struct world {
+typedef struct world world;
+typedef Vector2 (*force)(world*, unsigned int);
+struct world {
 	ARRAY(object) o;
 	ARRAY(force) f;
-} world;
+};
 int world_add_object(world *w, Vector2 p, Vector2 v, float r, unsigned int flags, float delta);
 #define world_add_object_at(w, p, flags) world_add_object(w, p, Vector2Zero(), 0, flags, 0)
 #define world_add_force(w, F) array_append((w)->f, F)
@@ -53,20 +54,10 @@ inline int world_add_object(world *w, Vector2 p, Vector2 v, float r, unsigned in
 
 void world_apply_forces(world *w)
 {
-	if (w->f.size == 0 || w->o.size < 2) return;
-	for (int i = 0; i < w->o.size; i++) {
-		AT(w->o, i).a = Vector2Zero();
-		for (int j = 0; j < w->o.size; j++) {
-			if (i==j) continue;
-			for (int k = 0; k < w->f.size; k++) {
-				force f = AT(w->f, k);
-				object *a = &AT(w->o, i);
-				object *b = &AT(w->o, j);
-				Vector2 acc = f(a, b);
-				AT(w->o, i).a = A(a->a, acc);
-			}
-		}
-	}
+	if (w->f.size == 0 || w->o.size == 0) return;
+	for (int i = 0; i < w->o.size; i++)
+		for (int j = 0; j < w->f.size; j++)
+			AT(w->o, i).a = AT(w->f, j)(w, i);
 }
 
 void world_step(world *w, double delta)

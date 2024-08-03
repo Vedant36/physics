@@ -1,5 +1,4 @@
 /* TODO:
- * - forces of type v.o[i].a += forces[j](w, v.o[i])
  * - symplectic integration to reduce energy deviation
  */
 #include <stdio.h>
@@ -11,7 +10,6 @@
 
 #define PROFILE_IMPLEMENTATION
 #include "profile.h"
-/* #define profile() 0		/\* uncomment if you don't want to use profile.h *\/ */
 
 #define SW 500
 #define SH 500
@@ -38,30 +36,14 @@ enum flags {
 	PHY_INVISIBLE = 0x1,
 	PHY_GRAVITY = 0x2,
 	PHY_MASSLESS = 0x4,
-	PHY_UNIVERSAL_GRAVITY_RECIEVER = 0x8,
-	PHY_UNIVERSAL_GRAVITY_DONOR = 0x10,
+	PHY_UNIVERSAL_GRAVITY = 0x8,
 };
-
-/* The interface to choosing which objects to apply the force to is
- * done by flags */
-Vector2 gravity(object *a, object *b)
-{
-	/* printf("flags: %d %d\n", a->flags, b->flags); */
-	if (a->flags&PHY_GRAVITY && !(b->flags&PHY_MASSLESS)) {
-		Vector2 r = Vector2Subtract(b->p, a->p);
-		float l = Vector2Length(r);
-		return Vector2Scale(r, powf(b->r, 3) * G/(l*l*l + 1));
-	} else if (a->flags&PHY_UNIVERSAL_GRAVITY_RECIEVER && b->flags&PHY_UNIVERSAL_GRAVITY_DONOR) {
-		return (Vector2) {0, G};
-	} else {
-		return Vector2Zero();
-	}
-}
 
 #define SAVE_COUNT 256
 #define HIST_SIZE 4096
 Vector2 position_history[SAVE_COUNT][HIST_SIZE] = {0};
-int pointer = 0, speed;
+int pointer = 0;
+float speed = 0;
 bool paused, hud, stepped = false;
 void reset(world *w, double delta)
 {
@@ -71,14 +53,8 @@ void reset(world *w, double delta)
 	paused = true;
 	pointer = 0;
 	speed = 1;
-	world_add_object_at(w, Vector2Zero(), PHY_GRAVITY);
-	AT(w->o, 0).r = 100;
-	world_add_object_at(w, ((Vector2) {0, -150}), PHY_GRAVITY);
-	Vector2 v = {120, 0};
-	AT(w->o, 1).r = 6;
-	AT(w->o, 1).v = v;
-	AT(w->o, 1).pp = Vector2Subtract(AT(w->o, w->o.size - 1).p,
-					Vector2Scale(v, delta));
+	world_add_object(w,       Vector2Zero(), (Vector2) {-0.0432, 0}, 100, PHY_GRAVITY, delta);
+	world_add_object(w, (Vector2) {0, -150}, (Vector2) {200, 0},   6, PHY_GRAVITY, delta);
 	for (int i = 0; i < SAVE_COUNT; i++) {
 		for (int j = 0; j < HIST_SIZE; j++) {
 			position_history[i][j] = Vector2Zero();
@@ -88,6 +64,7 @@ void reset(world *w, double delta)
 
 void object_log(int idx, object o);
 void object_show(object o);
+Vector2 gravity(world *w, unsigned int i);
 double profile_time[16];
 
 int main()
@@ -222,9 +199,11 @@ int main()
 		profile_time[time_count++] = profile();
 		BeginDrawing();
 		ClearBackground(BLACK);
-		DrawCircleV(T(g.p), 3*powf(total_mass, 1./3)/10, BLUE);
 		if (hud) {
 			DrawFPS(0, 0);
+			char buf[1024];
+			snprintf(buf, 1024, "Speed: %3.0f", speed);
+			DrawText(buf, 0, 16, 16, WHITE);
 		}
 		for (int i = 0; i < MIN(SAVE_COUNT, w.o.size); i++) {
 			for (int j = 0; j < HIST_SIZE; j++) {
@@ -265,3 +244,24 @@ void object_show(object o)
 		DrawCircleV(T(o.p), 3.*o.r*zoom/10, (Color) {255. * o.r / 100., 34, 56, 255});
 	}
 }
+
+/* The interface to choosing which objects to apply the force to is
+ * done by flags */
+Vector2 gravity(world *w, unsigned int i)
+{
+	object *p = &AT(w->o, i);
+	if (p->flags&PHY_UNIVERSAL_GRAVITY) {
+		return (Vector2) {0, G};
+	}
+	if (p->flags&PHY_GRAVITY) {
+		for (int j = 0; j < w->o.size; j++) {
+			object *q = &AT(w->o, j);
+			if (j == i || q->flags&PHY_MASSLESS) continue;
+			Vector2 r = Vector2Subtract(q->p, p->p);
+			float l = Vector2Length(r);
+			return Vector2Scale(r, powf(q->r, 3) * G/(l*l*l + 1));
+		}
+	}
+	return Vector2Zero();
+}
+
