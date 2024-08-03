@@ -31,6 +31,7 @@ Vector2 _t;
 #define T(v) (_t = v, (Vector2) {(_t.x - g.p.x)*zoom + origin.x, (-_t.y + g.p.y)*zoom + origin.y})
 #define _T(v) (_t = v, (Vector2) {(_t.x - origin.x)/zoom + g.p.x, -(_t.y - origin.y)/zoom + g.p.y})
 #define LOGV(v) (_t = v, printf("(%f %f)\n", _t.x, _t.y))
+#define MASS(o) (powf((o).r, 3))
 
 enum flags {
 	PHY_INVISIBLE = 0x1,
@@ -53,6 +54,7 @@ void reset(world *w, double delta)
 	paused = true;
 	pointer = 0;
 	speed = 1;
+	zoom = 1;
 	world_add_object(w,       Vector2Zero(), (Vector2) {-0.0432, 0}, 100, PHY_GRAVITY, delta);
 	world_add_object(w, (Vector2) {0, -150}, (Vector2) {200, 0},   6, PHY_GRAVITY, delta);
 	for (int i = 0; i < SAVE_COUNT; i++) {
@@ -92,10 +94,8 @@ int main()
 
 		/* Handle Keys */
 		if (KEY(R)) reset(&w, delta/SUBFRAMES);
-		if (KEY(A)) {
-			world_add_object_at(&w, _T(GetMousePosition()), PHY_GRAVITY);
-			AT(w.o, w.o.size - 1).r = powf(random()%500 + 500, 1./3);
-		}
+		if (KEY(A))
+			world_add_object(&w, _T(GetMousePosition()), Vector2Zero(), random()%16+4, PHY_GRAVITY, delta);
 		if (KEY(BACKSLASH)) hud = !hud;
 		if (KEY(SPACE)) paused = !paused;
 		BIND(Q, speed);
@@ -113,18 +113,20 @@ int main()
 		}
 		if (IsKeyPressed(KEY_D) || IsMouseButtonPressed(MOUSE_LEFT_BUTTON))
 			setpos = GetMousePosition();
-		if (IsKeyReleased(KEY_D) || IsMouseButtonReleased(MOUSE_LEFT_BUTTON)) {
-			Vector2 v = S(_T(GetMousePosition()), _T(setpos));
-			world_add_object(&w, _T(setpos), v, powf(random()%5000 + 500, 1./3), PHY_GRAVITY, delta/SUBFRAMES);
-		}
+		if (IsKeyReleased(KEY_D) || IsMouseButtonReleased(MOUSE_LEFT_BUTTON))
+			world_add_object(&w, _T(setpos),S(_T(GetMousePosition()), _T(setpos)),
+					random()%16+4, PHY_GRAVITY, delta/SUBFRAMES);
 		if (KEY(F)) {
-			float r = 100;
-			int mindx = -1;
-			for (int i = 0; i < w.o.size; i++) {
-				float l = Vector2Distance(GetMousePosition(), AT(w.o, i).p);
-				if (l < r) r = l, mindx = i;
-			}
+			int mindx;
+			array_max(w.o, -Vector2Distance(GetMousePosition(), T(o.p)), -100, mindx);
+			/* float r = 100; */
+			/* int mindx = -1; */
+			/* for (int i = 0; i < w.o.size; i++) { */
+			/* 	float l = Vector2Distance(GetMousePosition(), AT(w.o, i).p); */
+			/* 	if (l < r) r = l, mindx = i; */
+			/* } */
 			if (mindx >= 0) object_log(mindx, AT(w.o, mindx));
+
 		}
 		if (KEY(L))
 			for (int i = 0; i < w.o.size; i++)
@@ -159,14 +161,14 @@ int main()
 			double E = 0;
 			/* KE */
 			for (int i = 0; i < w.o.size; i++) {
-				double e = 0.5 * powf(AT(w.o, i).r, 3) * Vector2LengthSqr((AT(w.o, i).v));
+				double e = 0.5 * MASS(AT(w.o, i)) * Vector2LengthSqr((AT(w.o, i).v));
 				E += e;
 			}
 			/* PE */
 			for (int i = 0; i < w.o.size; i++) {
 				for (int j = 0; j < i; j++) {
 					object a = AT(w.o, i), b = AT(w.o, j);
-					double e = G*powf(a.r, 3)*powf(b.r, 3)/Vector2Distance(a.p, b.p);
+					double e = G*MASS(a)*MASS(b)/Vector2Distance(a.p, b.p);
 					E -= e;
 				}
 			}
@@ -178,7 +180,7 @@ int main()
 		if (!paused || stepped) {
 			Vector2 P = {0};
 			for (int i = 0; i < w.o.size; i++) {
-				Vector2 p = C(AT(w.o, i).v, powf(AT(w.o, i).r, 3));
+				Vector2 p = C(AT(w.o, i).v, MASS(AT(w.o, i)));
 			        P = A(P, p);
 			}
 			/* fprintf(stderr, "%d %f\n", tick++, L(P)); */
@@ -190,8 +192,8 @@ int main()
 		for (int i = 0; i < w.o.size; i++) {
 			object o = AT(w.o, i);
 			if (!CheckCollisionPointRec(T(o.p), screen)) continue;
-			com = A(com, C(o.p, powf(o.r, 3)));
-			total_mass += powf(o.r, 3);
+			com = A(com, C(o.p, MASS(o)));
+			total_mass += MASS(o);
 		}
 		g.p = total_mass > 0.1 ? C(com, 1./total_mass) : Vector2Zero();
 
@@ -213,7 +215,7 @@ int main()
 			}
 		}
 		for (int i = 0; i < w.o.size; i++)
-				object_show(AT(w.o, i));
+			object_show(AT(w.o, i));
 		EndDrawing();
 
 		profile_time[time_count++] = profile();
@@ -259,7 +261,7 @@ Vector2 gravity(world *w, unsigned int i)
 			if (j == i || q->flags&PHY_MASSLESS) continue;
 			Vector2 r = Vector2Subtract(q->p, p->p);
 			float l = Vector2Length(r);
-			return Vector2Scale(r, powf(q->r, 3) * G/(l*l*l + 1));
+			return Vector2Scale(r, MASS(*q) * G/(l*l*l + 1));
 		}
 	}
 	return Vector2Zero();
