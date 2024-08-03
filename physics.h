@@ -15,7 +15,7 @@ typedef struct frame {
 } frame;
 
 typedef struct object {
-	Vector2 p, pp;	/* Verlet */
+	Vector2 p, pp;
 	float r;
 	unsigned int flags;
 
@@ -27,14 +27,18 @@ typedef struct object {
 #endif
 typedef struct world world;
 typedef Vector2 (*force)(world*, unsigned int);
+typedef void (*constraint)(object*, double);
 struct world {
 	ARRAY(object) o;
 	ARRAY(force) f;
+	ARRAY(constraint) c;
 };
 int world_add_object(world *w, Vector2 p, Vector2 v, float r, unsigned int flags, float delta);
 #define world_add_object_at(w, p, flags) world_add_object(w, p, Vector2Zero(), 0, flags, 0)
+#define world_add_constraint(w, C) array_append((w)->c, C)
 #define world_add_force(w, F) array_append((w)->f, F)
 void world_apply_forces(world *w);
+void world_apply_constraints(world *w, double delta);
 void world_step(world *w, double delta);
 #define world_free(w)			\
 	do {					\
@@ -46,7 +50,7 @@ void world_step(world *w, double delta);
 
 #ifdef PHYSICS_IMPLEMENTATION
 
-inline int world_add_object(world *w, Vector2 p, Vector2 v, float r, unsigned int flags, float delta)
+int world_add_object(world *w, Vector2 p, Vector2 v, float r, unsigned int flags, float delta)
 {
 	array_append(w->o, ((object) {p, S(p, C(v, delta)), r, flags, v, Vector2Zero()}));
 	return w->o.size - 1;
@@ -54,12 +58,12 @@ inline int world_add_object(world *w, Vector2 p, Vector2 v, float r, unsigned in
 
 void world_apply_forces(world *w)
 {
-	if (w->f.size == 0 || w->o.size == 0) return;
 	for (int i = 0; i < w->o.size; i++)
 		for (int j = 0; j < w->f.size; j++)
 			AT(w->o, i).a = AT(w->f, j)(w, i);
 }
 
+/* Verlet Integration */
 void world_step(world *w, double delta)
 {
 	for (int i = 0; i < w->o.size; i++) {
@@ -71,8 +75,19 @@ void world_step(world *w, double delta)
 		/* p = 2 p - pp + a δ² */
 		ptr->p.x = 2*p.x - pp.x + a.x * delta * delta;
 		ptr->p.y = 2*p.y - pp.y + a.y * delta * delta;
-		ptr->v = A(v, C(a, delta));
+		ptr->v = C(S(ptr->p, pp), 1./2/delta);
 		ptr->pp = p;
+	}
+}
+
+void world_apply_constraints(world *w, double delta)
+{
+	for (int i = 0; i < w->c.size; i++) {
+		for (int j = 0; j < w->o.size; j++) {
+			constraint c = AT(w->c, i);
+			object *o = &AT(w->o, j);
+			c(o, delta);
+		}
 	}
 }
 
